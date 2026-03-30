@@ -87,7 +87,44 @@ class Taxonomy:
         ...
 
     def find_all_by_name(self, name: str) -> List[TaxonomyNode]:
-        """Find a node by its name, Raises an exception if not found."""
+        """
+        Find nodes by name (scientific name OR alternate names like synonyms, common names, etc.).
+        Returns a list of matching TaxonomyNode objects.
+        """
+        ...
+
+    def get_alternate_names(
+        self, tax_id: str, name_class: Optional[str] = None
+    ) -> List[dict[str, str]]:
+        """
+        Return all non-scientific names for a given taxonomy node.
+        Returns a list of dictionaries with keys: 'name', 'name_class', 'unique_name'
+
+        If `name_class` is provided, only return names matching that class
+        (e.g., 'common name', 'synonym', 'misspelling', etc.)
+        """
+        ...
+
+    def get_metadata(self, tax_id: str) -> dict[str, str]:
+        """
+        Return NCBI metadata for a given taxonomy node.
+        Returns a dictionary with metadata fields from nodes.dmp including:
+        - embl_code
+        - division_id
+        - genetic_code_id
+        - mitochondrial_genetic_code_id
+        - comments
+        - plastid_genetic_code_id
+        - specified_species
+        - hydrogenosome_genetic_code_id
+        - inherited_div_flag
+        - inherited_gc_flag
+        - inherited_mgc_flag
+        - genbank_hidden_flag
+        - hidden_subtree_root_flag
+        - inherited_pgc_flag
+        - inherited_hgc_flag
+        """
         ...
 
     def parent_with_distance(

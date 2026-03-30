@@ -106,7 +106,7 @@ is not found.
 #### `tax.find_all_by_name(name: str) -> List[TaxonomyNode]`
 
 Returns all the nodes with that name.
-In NCBI, it only accounts for *scientific names* and not synonyms.
+Searches both scientific names and alternate names (synonyms, common names, misspellings, etc.).
 
 #### `tax.children(tax_id: str) -> List[TaxonomyNode]`
 

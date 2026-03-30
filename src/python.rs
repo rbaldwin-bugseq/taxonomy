@@ -556,6 +556,69 @@ impl Taxonomy {
         Ok(self.tax.to_internal_index(tax_id).is_ok())
     }
 
+    /// get_alternate_names(self, tax_id: str, /, name_class: str)
+    /// --
+    ///
+    /// Return all non-scientific names for a given taxonomy node.
+    /// Returns a list of dictionaries with keys: 'name', 'name_class', 'unique_name'
+    ///
+    /// If `name_class` is provided, only return names matching that class
+    /// (e.g., 'common name', 'synonym', 'misspelling', etc.)
+    fn get_alternate_names(
+        &self,
+        tax_id: &str,
+        name_class: Option<&str>,
+    ) -> PyResult<Vec<HashMap<String, String>>> {
+        let idx = py_try!(self.tax.to_internal_index(tax_id));
+
+        let mut result = Vec::new();
+        for alt_name in self.tax.all_names.iter().filter(|n| n.tax_id_index == idx) {
+            // Filter by name_class if specified
+            if let Some(class_filter) = name_class {
+                if alt_name.name_class != class_filter {
+                    continue;
+                }
+            }
+
+            let mut name_dict = HashMap::new();
+            name_dict.insert("name".to_string(), alt_name.name.clone());
+            name_dict.insert("name_class".to_string(), alt_name.name_class.clone());
+            name_dict.insert("unique_name".to_string(), alt_name.unique_name.clone());
+            result.push(name_dict);
+        }
+
+        Ok(result)
+    }
+
+    /// get_metadata(self, tax_id: str)
+    /// --
+    ///
+    /// Return NCBI metadata for a given taxonomy node.
+    /// Returns a dictionary with metadata fields from nodes.dmp
+    fn get_metadata(&self, tax_id: &str) -> PyResult<HashMap<String, String>> {
+        let idx = py_try!(self.tax.to_internal_index(tax_id));
+        let metadata = &self.tax.node_metadata[idx];
+
+        let mut result = HashMap::new();
+        result.insert("embl_code".to_string(), metadata.embl_code.clone());
+        result.insert("division_id".to_string(), metadata.division_id.clone());
+        result.insert("inherited_div_flag".to_string(), metadata.inherited_div_flag.to_string());
+        result.insert("genetic_code_id".to_string(), metadata.genetic_code_id.clone());
+        result.insert("inherited_gc_flag".to_string(), metadata.inherited_gc_flag.to_string());
+        result.insert("mitochondrial_genetic_code_id".to_string(), metadata.mitochondrial_genetic_code_id.clone());
+        result.insert("inherited_mgc_flag".to_string(), metadata.inherited_mgc_flag.to_string());
+        result.insert("genbank_hidden_flag".to_string(), metadata.genbank_hidden_flag.to_string());
+        result.insert("hidden_subtree_root_flag".to_string(), metadata.hidden_subtree_root_flag.to_string());
+        result.insert("comments".to_string(), metadata.comments.clone());
+        result.insert("plastid_genetic_code_id".to_string(), metadata.plastid_genetic_code_id.clone());
+        result.insert("inherited_pgc_flag".to_string(), metadata.inherited_pgc_flag.to_string());
+        result.insert("specified_species".to_string(), metadata.specified_species.clone());
+        result.insert("hydrogenosome_genetic_code_id".to_string(), metadata.hydrogenosome_genetic_code_id.clone());
+        result.insert("inherited_hgc_flag".to_string(), metadata.inherited_hgc_flag.to_string());
+
+        Ok(result)
+    }
+
     fn __iter__(slf: PyRefMut<Self>, py: Python<'_>) -> PyResult<TaxonomyIterator> {
         let root = slf.tax.root();
         let root_idx = slf.tax.to_internal_index(root).unwrap();
