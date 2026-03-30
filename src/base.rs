@@ -11,6 +11,37 @@ use crate::taxonomy::Taxonomy;
 
 pub type InternalIndex = usize;
 
+/// Represents additional metadata for a taxonomic node from NCBI nodes.dmp
+/// All fields use native Rust types (no serde dependency for the data itself)
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Default)]
+pub struct NodeMetadata {
+    pub embl_code: String,
+    pub division_id: String,
+    pub inherited_div_flag: bool,
+    pub genetic_code_id: String,
+    pub inherited_gc_flag: bool,
+    pub mitochondrial_genetic_code_id: String,
+    pub inherited_mgc_flag: bool,
+    pub genbank_hidden_flag: bool,
+    pub hidden_subtree_root_flag: bool,
+    pub comments: String,
+    pub plastid_genetic_code_id: String,
+    pub inherited_pgc_flag: bool,
+    pub specified_species: String,
+    pub hydrogenosome_genetic_code_id: String,
+    pub inherited_hgc_flag: bool,
+}
+
+/// Represents a non-scientific name for a taxonomic node from NCBI names.dmp
+/// Scientific names are stored separately in GeneralTaxonomy.names
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
+pub struct TaxonomyName {
+    pub tax_id_index: InternalIndex,
+    pub name: String,
+    pub unique_name: String,
+    pub name_class: String,
+}
+
 /// The type that is returned when loading any taxonomies through that library.
 /// It include 2 implementations of the [Taxonomy] trait: one using strings as ids
 /// (easier to use but slower) and one using internal indices (harder to use but faster).
@@ -25,9 +56,18 @@ pub struct GeneralTaxonomy {
     // Only used by the JSON format
     pub data: Vec<HashMap<String, Value>>,
 
+    // NCBI-specific fields for extended taxonomy information
+    /// All non-scientific names (synonyms, common names, etc.)
+    /// Scientific names are stored in the `names` field only
+    pub all_names: Vec<TaxonomyName>,
+    /// NCBI node metadata (genetic codes, flags, etc.)
+    pub node_metadata: Vec<NodeMetadata>,
+
     // Lookup tables that can dramatically speed up some operations
     pub(crate) tax_id_lookup: HashMap<String, InternalIndex>,
     pub(crate) children_lookup: Vec<Vec<InternalIndex>>,
+    /// Maps name strings to indices in the all_names vector for fast lookup
+    pub(crate) name_lookup: HashMap<String, Vec<usize>>,
 }
 
 impl Default for GeneralTaxonomy {
@@ -40,9 +80,12 @@ impl Default for GeneralTaxonomy {
             ranks: vec![TaxRank::Unspecified],
             names: vec!["root".to_string()],
             data: vec![HashMap::new()],
+            all_names: Vec::new(),
+            node_metadata: vec![NodeMetadata::default()],
 
             tax_id_lookup: HashMap::new(),
             children_lookup: Vec::new(),
+            name_lookup: HashMap::new(),
         };
 
         tax.index();
@@ -56,7 +99,7 @@ impl GeneralTaxonomy {
     /// calls this), but it's possible that a user might want to save
     /// memory/start-up time so it's theoretically possible to use this
     /// struct without running this.
-    fn index(&mut self) {
+    pub fn index(&mut self) {
         self.tax_id_lookup.clear();
         for (ix, tax_id) in self.tax_ids.iter().enumerate() {
             self.tax_id_lookup.insert(tax_id.clone(), ix);
@@ -74,6 +117,15 @@ impl GeneralTaxonomy {
             if ix != 0 {
                 self.children_lookup[*parent_ix].push(ix);
             }
+        }
+
+        // Build name lookup index for all_names
+        self.name_lookup.clear();
+        for (ix, tax_name) in self.all_names.iter().enumerate() {
+            self.name_lookup
+                .entry(tax_name.name.clone())
+                .or_insert_with(Vec::new)
+                .push(ix);
         }
     }
 
@@ -209,9 +261,12 @@ impl GeneralTaxonomy {
             names: adj_names,
             ranks: adj_ranks,
             data: adj_data,
+            all_names: Vec::new(),
+            node_metadata: vec![NodeMetadata::default(); size],
 
             tax_id_lookup: HashMap::with_capacity(size),
             children_lookup: vec![Vec::new(); size],
+            name_lookup: HashMap::new(),
         };
         tax.index();
         tax.validate()?;
@@ -219,19 +274,33 @@ impl GeneralTaxonomy {
     }
 
     /// Retrieves all external IDs given a name
+    /// Searches both scientific names and all other names (synonyms, common names, etc.)
     pub fn find_all_by_name(&self, name: &str) -> Vec<&str> {
-        let name_indices = self
-            .names
-            .iter()
-            .enumerate()
-            .filter(|(_, val)| val == &name)
-            .map(|(pos, _)| pos)
-            .collect::<Vec<usize>>();
+        let mut result_indices = HashSet::new();
 
-        name_indices
+        // Search scientific names
+        for (idx, sci_name) in self.names.iter().enumerate() {
+            if sci_name == name {
+                result_indices.insert(idx);
+            }
+        }
+
+        // Search all_names using the lookup index
+        if let Some(name_indices) = self.name_lookup.get(name) {
+            for &name_idx in name_indices {
+                let tax_name = &self.all_names[name_idx];
+                result_indices.insert(tax_name.tax_id_index);
+            }
+        }
+
+        // Convert indices to tax_ids
+        let mut result: Vec<&str> = result_indices
             .iter()
-            .map(|&pos| &self.tax_ids[pos] as &str)
-            .collect()
+            .map(|&idx| self.tax_ids[idx].as_str())
+            .collect();
+
+        result.sort_unstable();
+        result
     }
 
     /// Add a new node to the taxonomy.
@@ -245,6 +314,7 @@ impl GeneralTaxonomy {
         self.ranks.push(TaxRank::Unspecified);
         self.names.push(String::new());
         self.data.push(HashMap::new());
+        self.node_metadata.push(NodeMetadata::default());
 
         // update the cached lookup tables
         self.tax_id_lookup.insert(tax_id.to_string(), new_idx);
@@ -285,6 +355,16 @@ impl GeneralTaxonomy {
             }
         }
 
+        // Remove all names associated with this node from all_names
+        self.all_names.retain(|name| name.tax_id_index != idx);
+
+        // Update all_names indices that point to nodes after the removed one
+        for name in self.all_names.iter_mut() {
+            if name.tax_id_index > idx {
+                name.tax_id_index -= 1;
+            }
+        }
+
         // and delete the node from all the other tables
         // (note we do this last so we still have the tax id above)
         self.tax_ids.remove(idx);
@@ -292,6 +372,7 @@ impl GeneralTaxonomy {
         self.parent_distances.remove(idx);
         self.ranks.remove(idx);
         self.names.remove(idx);
+        self.node_metadata.remove(idx);
 
         // everything after `tax_id` in parents needs to get decremented by 1
         // because we've changed the actual array size
