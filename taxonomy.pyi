@@ -79,6 +79,21 @@ class Taxonomy:
         """
         Export a Taxonomy to NCBI format files (nodes.dmp and names.dmp).
         The output directory will be created if it doesn't exist.
+
+        Note: This function writes nodes.dmp with default/empty values for metadata fields.
+        Use to_ncbi_full() to preserve all NCBI metadata and alternate names.
+        """
+        ...
+
+    def to_ncbi_full(self, output_dir: str) -> None:
+        """
+        Export a Taxonomy to NCBI format with full metadata preservation.
+        Writes nodes.dmp and names.dmp with all NCBI-specific fields including:
+        - All metadata fields (genetic codes, flags, comments, etc.)
+        - All alternate names (synonyms, common names, misspellings, type material, etc.)
+
+        Use this function for complete NCBI taxonomy round-trips.
+        The output directory will be created if it doesn't exist.
         """
         ...
 
